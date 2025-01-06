@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PGP Web of Trust Visualizer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.6/standalone/umd/vis-network.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <style>
+        body { 
+            margin: 0; 
+            padding: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #f8fafc;
+        }
+        .container { 
+            max-width: 1400px; 
+            margin: 0 auto; 
+        }
+        #network { 
+            height: 700px; 
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+            border: 1px solid #e5e7eb;
+        }
+        .trust-level {
+            padding: 4px 8px;
+            border-radius: 4px;
+            color: white;
+            display: inline-block;
+            margin: 2px;
+            font-size: 0.875rem;
+        }
+        .implicit { background-color: #3b82f6; }
+        .complete { background-color: #22c55e; }
+        .partial { background-color: #f59e0b; }
+        .marginal { background-color: #7c3aed; }
+        .invalid { background-color: #ef4444; }
+        
+        .trust-info {
+            position: absolute;
+            background: white;
+            border: 1px solid #e5e7eb;
+            padding: 8px;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: none;
+            z-index: 1000;
+        }
+
+        .status-badge {
+            padding: 2px 6px;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .status-success {
+            background-color: #dcfce7;
+            color: #166534;
+        }
+
+        .status-error {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-3xl font-bold mb-8 text-gray-800">PGP Web of Trust Visualizer</h1>
+        
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+            <!-- Add User Panel -->
+            <div class="bg-white p-6 rounded-xl shadow-sm">
+                <h2 class="text-xl font-semibold mb-4">Add User</h2>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                        <input type="text" id="nodeName" 
+                               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500"
+                               placeholder="Enter username">
+                    </div>
+                    <button onclick="addNode()" 
+                            class="w-full bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 transition-colors">
+                        Add User
+                    </button>
+                </div>
+            </div>
+
+            <!-- Sign Key Panel -->
+            <div class="bg-white p-6 rounded-xl shadow-sm">
+                <h2 class="text-xl font-semibold mb-4">Sign Key</h2>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Signer</label>
+                        <select id="signerNode" 
+                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500">
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Target</label>
+                        <select id="targetNode" 
+                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500">
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Trust Level</label>
+                        <select id="trustLevel" 
+                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500">
+                            <option value="complete">Complete Trust</option>
+                            <option value="partial">Partial Trust</option>
+                        </select>
+                    </div>
+                    <button onclick="addSignature()" 
+                            class="w-full bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 transition-colors">
+                        Sign Key
+                    </button>
+                </div>
+            </div>
+
+            <!-- Verify Trust Panel -->
+            <div class="bg-white p-6 rounded-xl shadow-sm">
+                <h2 class="text-xl font-semibold mb-4">Verify Trust</h2>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">From User</label>
+                        <select id="checkViewer" 
+                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500">
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">To User</label>
+                        <select id="checkTarget" 
+                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500">
+                        </select>
+                    </div>
+                    <button onclick="checkTrust()" 
+                            class="w-full bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 transition-colors">
+                        Verify Trust
+                    </button>
+                    <div id="trustResult" class="mt-3 p-4 rounded-md border hidden">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Network Visualization -->
+        <div id="network"></div>
+        <div id="trustInfo" class="trust-info"></div>
+    </div>
+
+    <script>
+        const nodes = new vis.DataSet();
+        const edges = new vis.DataSet();
+        let network = null;
+
+        const trustColors = {
+            'implicit': '#3b82f6',
+            'complete': '#22c55e',
+            'partial': '#f59e0b',
+            'marginal': '#7c3aed',
+            'invalid': '#ef4444'
+        };
+
+        function initNetwork() {
+            const container = document.getElementById('network');
+            const data = { nodes, edges };
+            const options = {
+                layout: {
+                    improvedLayout: true,
+                    hierarchical: {
+                        enabled: true,
+                        direction: 'UD',
+                        sortMethod: 'directed',
+                        nodeSpacing: 200,
+                        levelSeparation: 150
+                    }
+                },
+                nodes: {
+                    shape: 'box',
+                    margin: 10,
+                    borderWidth: 2,
+                    shadow: true,
+                    font: {
+                        size: 16,
+                        color: '#111827'
+                    }
+                },
+                edges: {
+                    arrows: {
+                        to: { enabled: true }
+                    },
+                    color: { inherit: 'both' },
+                    smooth: {
+                        type: 'cubicBezier',
+                        forceDirection: 'vertical'
+                    },
+                    font: {
+                        size: 12,
+                        align: 'middle'
+                    }
+                },
+                physics: false,
+                interaction: {
+                    hover: true
+                }
+            };
+            network = new vis.Network(container, data, options);
+
+            // Add hover effects
+            network.on("hoverEdge", params => {
+                const edge = edges.get(params.edge);
+                showTrustInfo(edge, params.event);
+            });
+            network.on("blurEdge", () => {
+                hideTrustInfo();
+            });
+
+            // Reset highlighted paths when clicking empty space
+            network.on("click", params => {
+                if (!params.nodes.length && !params.edges.length) {
+                    resetHighlights();
+                }
+            });
+        }
+
+        function showTrustInfo(edge, event) {
+            const trustInfo = document.getElementById('trustInfo');
+            trustInfo.innerHTML = `
+                <div class="trust-level ${edge.label}">
+                    ${edge.from} → ${edge.to}
+                    <br>
+                    Trust Level: ${edge.label}
+                </div>
+            `;
+            trustInfo.style.display = 'block';
+            trustInfo.style.left = event.pageX + 10 + 'px';
+            trustInfo.style.top = event.pageY + 10 + 'px';
+        }
+
+        function hideTrustInfo() {
+            document.getElementById('trustInfo').style.display = 'none';
+        }
+
+        async function addNode() {
+            const name = document.getElementById('nodeName').value.trim();
+            
+            if (!name) {
+                alert('Please enter a username');
+                return;
+            }
+            
+            if (nodes.get(name)) {
+                alert('User already exists');
+                return;
+            }
+            
+            const response = await fetch('/pgp/api/add_node', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name })
+            });
+            
+            const data = await response.json();
+            if (data.success) {
+                nodes.add({
+                    id: name,
+                    label: name,
+                    color: {
+                        background: trustColors.implicit,
+                        border: '#475569'
+                    }
+                });
+                updateSelectors();
+                document.getElementById('nodeName').value = '';
+            }
+        }
+
+        async function addSignature() {
+            const signer = document.getElementById('signerNode').value;
+            const target = document.getElementById('targetNode').value;
+            const trustLevel = document.getElementById('trustLevel').value;
+            
+            if (signer === target) {
+                alert('Cannot sign own key (implicit trust is automatic)');
+                return;
+            }
+            
+            const response = await fetch('/pgp/api/add_signature', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ signer, target, trust_level: trustLevel })
+            });
+            
+            const data = await response.json();
+            if (data.success) {
+                // Remove existing edge if it exists
+                const existingEdges = edges.get({
+                    filter: edge => edge.from === signer && edge.to === target
+                });
+                
+                if (existingEdges.length > 0) {
+                    edges.update({
+                        id: existingEdges[0].id,
+                        color: trustColors[trustLevel],
+                        label: trustLevel
+                    });
+                } else {
+                    edges.add({
+                        from: signer,
+                        to: target,
+                        color: trustColors[trustLevel],
+                        label: trustLevel,
+                        arrows: {
+                            to: { enabled: true }
+                        }
+                    });
+                }
+                
+                // Reset any existing trust verification highlights
+                resetHighlights();
+            } else {
+                alert(data.message || 'Failed to add signature');
+            }
+        }
+
+        async function checkTrust() {
+            const viewer = document.getElementById('checkViewer').value;
+            const target = document.getElementById('checkTarget').value;
+            
+            if (viewer === target) {
+                displayTrustResult({
+                    trusted: true,
+                    trust_level: 'implicit',
+                    reason: 'Self trust (implicit)',
+                    paths: [[viewer]]
+                });
+                return;
+            }
+            
+            const response = await fetch('/pgp/api/check_trust', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ viewer, target })
+            });
+            
+            const data = await response.json();
+            displayTrustResult(data);
+        }
+
+        function displayTrustResult(data) {
+            const resultDiv = document.getElementById('trustResult');
+            
+            resultDiv.className = `mt-3 p-4 rounded-md border ${
+                data.trusted ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
+            }`;
+            
+            resultDiv.innerHTML = `
+                <div class="flex items-center space-x-2">
+                    <div class="trust-level ${data.trust_level}">
+                        ${data.trust_level.toUpperCase()}
+                        <span class="ml-2">${data.trusted ? '✓' : '✗'}</span>
+                    </div>
+                </div>
+                <p class="mt-2 text-sm ${
+                    data.trusted ? 'text-green-800' : 'text-red-800'
+                }">${data.reason}</p>
+                ${data.paths.length ? `
+                    <div class="mt-3">
+                        <p class="font-medium text-sm text-gray-700">Trust path${
+                            data.paths.length > 1 ? 's' : ''
+                        }:</p>
+                        <ul class="mt-1 space-y-1">
+                            ${data.paths.map(path => `
+                                <li class="text-sm text-gray-600">
+                                    ${path.join(' → ')}
+                                </li>
+                            `).join('')}
+                        </ul>
+                    </div>
+                ` : ''}
+            `;
+            
+            resultDiv.classList.remove('hidden');
+            highlightTrustPaths(data.paths);
+        }
+
+        function highlightTrustPaths(paths) {
+            resetHighlights();
+            
+            paths.forEach(path => {
+                for (let i = 0; i < path.length - 1; i++) {
+                    const edgesToUpdate = edges.get({
+                        filter: edge => 
+                            edge.from === path[i] && edge.to === path[i + 1]
+                    });
+                    
+                    edgesToUpdate.forEach(edge => {
+                        edges.update({
+                            ...edge,
+                            width: 3,
+                            color: {
+                                color: '#10B981',
+                                highlight: '#059669'
+                            }
+                        });
+                    });
+                    
+                    // Highlight the nodes in the path
+                    nodes.update({
+                        id: path[i],
+                        color: {
+                            background: '#D1FAE5',
+                            border: '#059669'
+                        }
+                    });
+                }
+                
+                // Highlight the last node in the path
+                if (path.length > 0) {
+                    nodes.update({
+                        id: path[path.length - 1],
+                        color: {
+                            background: '#D1FAE5',
+                            border: '#059669'
+                        }
+                    });
+                }
+            });
+        }
+
+        function resetHighlights() {
+            // Reset edge styles
+            edges.forEach(edge => {
+                edges.update({
+                    id: edge.id,
+                    width: 1,
+                    color: trustColors[edge.label]
+                });
+            });
+            
+            // Reset node styles
+            nodes.forEach(node => {
+                nodes.update({
+                    id: node.id,
+                    color: {
+                        background: trustColors.implicit,
+                        border: '#475569'
+                    }
+                });
+            });
+        }
+
+        function updateSelectors() {
+            const nodeList = nodes.get().map(node => node.id);
+            ['signerNode', 'targetNode', 'checkViewer', 'checkTarget'].forEach(id => {
+                const select = document.getElementById(id);
+                const currentValue = select.value;
+                
+                select.innerHTML = nodeList
+                    .map(node => `
+                        <option value="${node}" ${node === currentValue ? 'selected' : ''}>
+                            ${node}
+                        </option>
+                    `)
+                    .join('');
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', initNetwork);
+    </script>
+</body>
+</html>
