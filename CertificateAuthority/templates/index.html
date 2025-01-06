@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Certificate Authority Trust Network</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.6/standalone/umd/vis-network.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <style>
+        #network-container {
+            height: 600px;
+            border: 1px solid #ddd;
+            background-color: #f8f9fa;
+        }
+        .controls {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .trust-result {
+            margin: 20px 0;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            font-weight: bold;
+        }
+        .trust-true { background-color: #d4edda; color: #155724; }
+        .trust-false { background-color: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Certificate Authority Trust Network</h1>
+        
+        <div class="controls">
+            <h3>Add Entity</h3>
+            <input type="text" id="entity-name" placeholder="Entity Name" required>
+            <select id="trust-level" required>
+                <option value="Implicit">Implicit</option>
+                <option value="Complete">Complete</option>
+                <option value="Partial Trust">Partial Trust</option>
+                <option value="Marginally Valid">Marginally Valid</option>
+                <option value="Invalid">Invalid</option>
+            </select>
+            <button onclick="addEntity()">Add Entity</button>
+        </div>
+
+        <div class="controls">
+            <h3>Add Trust Relationship</h3>
+            <select id="from-entity"></select>
+            <select id="to-entity"></select>
+            <button onclick="addTrust()">Add Trust</button>
+        </div>
+
+        <div class="controls">
+            <h3>Check Trust</h3>
+            <select id="check-from"></select>
+            <select id="check-to"></select>
+            <button onclick="checkTrust()">Check Trust</button>
+        </div>
+
+        <div id="trust-result"></div>
+        <div id="network-container"></div>
+    </div>
+
+    <script>
+        let network = null;
+        const nodes = new vis.DataSet();
+        const edges = new vis.DataSet();
+
+        // Network visualization options
+        const options = {
+            nodes: {
+                shape: 'box',
+                margin: 10,
+                font: { size: 16 },
+                shadow: true
+            },
+            edges: {
+                arrows: { to: true },
+                smooth: { type: 'cubicBezier' }
+            },
+            layout: {
+                hierarchical: {
+                    direction: 'UD',
+                    sortMethod: 'directed',
+                    levelSeparation: 150,
+                    nodeSpacing: 200
+                }
+            },
+            physics: false
+        };
+
+        function createNetwork() {
+            const container = document.getElementById('network-container');
+            network = new vis.Network(container, { nodes, edges }, options);
+        }
+
+        function getTrustLevelColor(level) {
+            return {
+                'Implicit': '#2ecc71',
+                'Complete': '#27ae60',
+                'Partial Trust': '#f1c40f',
+                'Marginally Valid': '#e67e22',
+                'Invalid': '#e74c3c'
+            }[level] || '#bdc3c7';
+        }
+
+        async function refreshGraph() {
+            const response = await fetch('/get_graph');
+            const data = await response.json();
+            
+            nodes.clear();
+            edges.clear();
+
+            // Update node dropdowns
+            ['from-entity', 'to-entity', 'check-from', 'check-to'].forEach(id => {
+                const select = document.getElementById(id);
+                select.innerHTML = data.nodes
+                    .map(node => `<option value="${node}">${node} (${data.trust_levels[node]})</option>`)
+                    .join('');
+            });
+
+            // Add nodes with trust level colors
+            data.nodes.forEach(node => {
+                nodes.add({
+                    id: node,
+                    label: `${node}\n(${data.trust_levels[node]})`,
+                    color: {
+                        background: getTrustLevelColor(data.trust_levels[node]),
+                        border: '#2c3e50'
+                    }
+                });
+            });
+
+            // Add edges
+            data.edges.forEach(([from, to]) => {
+                edges.add({ from, to });
+            });
+
+            network.fit();
+        }
+
+        // Event handlers
+        async function addEntity() {
+            const name = document.getElementById('entity-name').value.trim();
+            const trustLevel = document.getElementById('trust-level').value;
+            
+            if (!name) return alert('Please enter an entity name');
+            
+            await fetch('/add_entity', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, trust_level: trustLevel })
+            });
+            
+            document.getElementById('entity-name').value = '';
+            await refreshGraph();
+        }
+
+        async function addTrust() {
+            const fromEntity = document.getElementById('from-entity').value;
+            const toEntity = document.getElementById('to-entity').value;
+            
+            if (fromEntity === toEntity) {
+                return alert('Cannot create trust relationship to self');
+            }
+            
+            await fetch('/add_trust', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ from: fromEntity, to: toEntity })
+            });
+            
+            await refreshGraph();
+        }
+
+        async function checkTrust() {
+            const fromEntity = document.getElementById('check-from').value;
+            const toEntity = document.getElementById('check-to').value;
+            
+            const response = await fetch('/check_trust', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ from: fromEntity, to: toEntity })
+            });
+            
+            const result = await response.json();
+            const resultDiv = document.getElementById('trust-result');
+            resultDiv.textContent = result.has_trust ? 
+                'Trust relationship exists!' : 
+                'No trust relationship found.';
+            resultDiv.className = 'trust-result ' + 
+                (result.has_trust ? 'trust-true' : 'trust-false');
+        }
+
+        // Initialize
+        createNetwork();
+        refreshGraph();
+    </script>
+</body>
+</html>
