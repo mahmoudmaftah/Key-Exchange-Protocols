@@ -1,202 +1,420 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Certificate Authority Trust Network</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.6/standalone/umd/vis-network.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
-    <style>
-        #network-container {
+    <title>CA Trust Model System</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.6/standalone/umd/vis-network.min.js"></script>    <style>
+        body { margin: 0; padding: 20px; font-family: Arial, sans-serif; background: #f0f2f5; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 20px; }
+        .panel { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        #network {
             height: 600px;
-            border: 1px solid #ddd;
-            background-color: #f8f9fa;
-        }
-        .controls {
-            margin: 20px 0;
-            padding: 15px;
-            background-color: #fff;
+            min-width: 400px;
+            width: 100%;
+            background: white;
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .trust-result {
-            margin: 20px 0;
-            padding: 15px;
-            border-radius: 8px;
-            text-align: center;
-            font-weight: bold;
-        }
-        .trust-true { background-color: #d4edda; color: #155724; }
-        .trust-false { background-color: #f8d7da; color: #721c24; }
+        }        .form-group { margin-bottom: 10px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        select, input { width: 100%; padding: 8px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px; }
+        button { width: 100%; background: #4CAF50; color: white; padding: 10px; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #45a049; }
+        #trustResult { margin-top: 10px; padding: 10px; border-radius: 4px; }
+        .success { background: #e8f5e9; color: #2e7d32; }
+        .error { background: #ffebee; color: #c62828; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Certificate Authority Trust Network</h1>
-        
         <div class="controls">
-            <h3>Add Entity</h3>
-            <input type="text" id="entity-name" placeholder="Entity Name" required>
-            <select id="trust-level" required>
-                <option value="Implicit">Implicit</option>
-                <option value="Complete">Complete</option>
-                <option value="Partial Trust">Partial Trust</option>
-                <option value="Marginally Valid">Marginally Valid</option>
-                <option value="Invalid">Invalid</option>
-            </select>
-            <button onclick="addEntity()">Add Entity</button>
+            <div class="panel">
+                <h2>Model Settings</h2>
+                <div class="form-group">
+                    <label>Trust Model Type</label>
+                    <select id="modelType">
+                        <option value="strict">Strict Hierarchy</option>
+                        <option value="networked">Networked Trust</option>
+                        <option value="browser">Web Browser Model</option>
+                        <option value="pgp">PGP Web of Trust</option>
+                    </select>
+                </div>
+                <button onclick="createModel()">Initialize Model</button>
+            </div>
+
+            <div class="panel">
+                <h2>Add Node</h2>
+                <div class="form-group">
+                    <label>Name</label>
+                    <input type="text" id="nodeName" placeholder="Enter node name">
+                    <label>Node Type</label>
+                    <select id="nodeType"></select>
+                    <label>Trust Level (PGP only)</label>
+                    <select id="trustLevel" disabled>
+                        <option value="Complete">Complete Trust</option>
+                        <option value="Implicit">Implicit Trust</option>
+                        <option value="Partial">Partial Trust</option>
+                        <option value="Marginal">Marginal Trust</option>
+                        <option value="Invalid">Invalid Trust</option>
+                    </select>
+                </div>
+                <button onclick="addNode()">Add Node</button>
+            </div>
+
+            <div class="panel">
+                <h2>Add Trust Relationship</h2>
+                <div class="form-group">
+                    <label>From</label>
+                    <select id="sourceNode"></select>
+                    <label>To</label>
+                    <select id="targetNode"></select>
+                </div>
+                <button onclick="addEdge()">Add Relationship</button>
+            </div>
+
+            <div class="panel">
+                <h2>Check Trust</h2>
+                <div class="form-group">
+                    <label>From</label>
+                    <select id="checkSource"></select>
+                    <label>To</label>
+                    <select id="checkTarget"></select>
+                </div>
+                <button onclick="checkTrust()">Verify Trust</button>
+                <div id="trustResult"></div>
+            </div>
         </div>
 
-        <div class="controls">
-            <h3>Add Trust Relationship</h3>
-            <select id="from-entity"></select>
-            <select id="to-entity"></select>
-            <button onclick="addTrust()">Add Trust</button>
-        </div>
-
-        <div class="controls">
-            <h3>Check Trust</h3>
-            <select id="check-from"></select>
-            <select id="check-to"></select>
-            <button onclick="checkTrust()">Check Trust</button>
-        </div>
-
-        <div id="trust-result"></div>
-        <div id="network-container"></div>
+        <div id="network"></div>
     </div>
 
     <script>
         let network = null;
-        const nodes = new vis.DataSet();
-        const edges = new vis.DataSet();
-
-        // Network visualization options
-        const options = {
-            nodes: {
-                shape: 'box',
-                margin: 10,
-                font: { size: 16 },
-                shadow: true
-            },
-            edges: {
-                arrows: { to: true },
-                smooth: { type: 'cubicBezier' }
-            },
-            layout: {
-                hierarchical: {
-                    direction: 'UD',
-                    sortMethod: 'directed',
-                    levelSeparation: 150,
-                    nodeSpacing: 200
-                }
-            },
-            physics: false
+        let nodes = new vis.DataSet();
+        let edges = new vis.DataSet();
+    
+        const nodeColors = {
+            'Root CA': '#3b82f6',
+            'Super Root CA': '#7c3aed',
+            'Intermediate CA': '#10b981',
+            'End Entity': '#6b7280',
+            'PGP User': '#f59e0b'
         };
-
-        function createNetwork() {
-            const container = document.getElementById('network-container');
-            network = new vis.Network(container, { nodes, edges }, options);
+    
+        const trustLevelColors = {
+            'Complete': '#22c55e',
+            'Implicit': '#3b82f6',
+            'Partial': '#f59e0b',
+            'Marginal': '#d97706',
+            'Invalid': '#ef4444'
+        };
+    
+        const nodeTypes = {
+            strict: ['Root CA', 'Intermediate CA', 'End Entity'],
+            networked: ['Root CA', 'Super Root CA'],
+            browser: ['Root CA', 'Intermediate CA', 'End Entity'],
+            pgp: ['PGP User']
+        };
+    
+        function getNodeColor(nodeType, trustLevel) {
+            return trustLevel ? trustLevelColors[trustLevel] : nodeColors[nodeType];
         }
-
-        function getTrustLevelColor(level) {
+    
+        function createNode(name, nodeType, trustLevel) {
             return {
-                'Implicit': '#2ecc71',
-                'Complete': '#27ae60',
-                'Partial Trust': '#f1c40f',
-                'Marginally Valid': '#e67e22',
-                'Invalid': '#e74c3c'
-            }[level] || '#bdc3c7';
+                id: name,
+                label: name,
+                title: `${nodeType}${trustLevel ? `\nTrust: ${trustLevel}` : ''}`,
+                color: {
+                    background: getNodeColor(nodeType, trustLevel),
+                    border: '#1f2937',
+                    highlight: { background: '#93c5fd', border: '#1f2937' }
+                },
+                font: { color: '#ffffff' }
+            };
         }
-
-        async function refreshGraph() {
-            const response = await fetch('/get_graph');
-            const data = await response.json();
+    
+        function updateNodeTypeOptions() {
+            const modelType = document.getElementById('modelType').value;
+            const nodeTypeSelect = document.getElementById('nodeType');
+            const trustLevelSelect = document.getElementById('trustLevel');
             
-            nodes.clear();
-            edges.clear();
-
-            // Update node dropdowns
-            ['from-entity', 'to-entity', 'check-from', 'check-to'].forEach(id => {
-                const select = document.getElementById(id);
-                select.innerHTML = data.nodes
-                    .map(node => `<option value="${node}">${node} (${data.trust_levels[node]})</option>`)
+            nodeTypeSelect.innerHTML = nodeTypes[modelType]
+                .map(type => `<option value="${type}">${type}</option>`)
+                .join('');
+                
+            trustLevelSelect.disabled = modelType !== 'pgp';
+            updateLayout();
+        }
+    
+        function updateLayout() {
+            const modelType = document.getElementById('modelType').value;
+            const options = {
+                physics: {
+                    enabled: modelType === 'pgp',
+                    hierarchicalRepulsion: {
+                        nodeDistance: 150,
+                        springLength: 200,
+                        springConstant: 0.01,
+                        damping: 0.09
+                    },
+                    stabilization: {
+                        iterations: 50,
+                        updateInterval: 25
+                    }
+                },
+                layout: {
+                    hierarchical: {
+                        enabled: modelType !== 'pgp',
+                        direction: 'UD',
+                        sortMethod: 'directed',
+                        nodeSpacing: 150,
+                        levelSeparation: 150,
+                        treeSpacing: 200
+                    }
+                },
+                nodes: {
+                    shape: 'box',
+                    margin: 10,
+                    font: { size: 14, face: 'system-ui' },
+                    borderWidth: 2,
+                    shadow: true
+                },
+                edges: {
+                    arrows: { to: { enabled: true, scaleFactor: 1 }},
+                    color: { color: '#64748b', highlight: '#2563eb' },
+                    width: 2,
+                    smooth: {
+                        type: modelType === 'pgp' ? 'dynamic' : 'cubicBezier',
+                        roundness: 0.5
+                    }
+                }
+            };
+            
+            if (network) {
+                network.setOptions(options);
+                network.stabilize();
+            } else {
+                const container = document.getElementById('network');
+                network = new vis.Network(container, { nodes, edges }, options);
+            }
+        }
+    
+        async function createModel() {
+            const modelType = document.getElementById('modelType').value;
+            try {
+                const response = await fetch('/api/create_model', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: modelType })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    if (network) {
+                        network.destroy();
+                        network = null;
+                    }
+                    nodes.clear();
+                    edges.clear();
+                    updateNodeTypeOptions();
+                    initNetwork(); // Reinitialize the network
+                    document.getElementById('trustResult').textContent = '';
+                    document.getElementById('trustResult').className = '';
+                }
+            } catch (error) {
+                console.error('Error creating model:', error);
+            }
+        }
+    
+        async function addNode() {
+            const modelType = document.getElementById('modelType').value;
+            const name = document.getElementById('nodeName').value;
+            const nodeType = document.getElementById('nodeType').value;
+            const trustLevel = modelType === 'pgp' ? 
+                document.getElementById('trustLevel').value : undefined;
+            
+            if (!name) {
+                alert('Please enter a node name');
+                return;
+            }
+    
+            try {
+                const response = await fetch('/api/add_node', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model_type: modelType,
+                        name: name,
+                        node_type: nodeType,
+                        trust_level: trustLevel
+                    })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    nodes.add(createNode(name, nodeType, trustLevel));
+                    updateNodeSelectors();
+                    document.getElementById('nodeName').value = '';
+                }
+            } catch (error) {
+                console.error('Error adding node:', error);
+            }
+        }
+    
+        async function addEdge() {
+            const modelType = document.getElementById('modelType').value;
+            const source = document.getElementById('sourceNode').value;
+            const target = document.getElementById('targetNode').value;
+    
+            if (source === target) {
+                alert('Cannot create self-referential trust relationship');
+                return;
+            }
+    
+            try {
+                const response = await fetch('/api/add_edge', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model_type: modelType,
+                        source: source,
+                        target: target
+                    })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    edges.add({
+                        from: source,
+                        to: target,
+                        arrows: 'to'
+                    });
+                } else {
+                    alert('Invalid trust relationship for the selected model type');
+                }
+            } catch (error) {
+                console.error('Error adding edge:', error);
+            }
+        }
+    
+        async function checkTrust() {
+            const modelType = document.getElementById('modelType').value;
+            const source = document.getElementById('checkSource').value;
+            const target = document.getElementById('checkTarget').value;
+    
+            try {
+                const response = await fetch('/api/check_trust', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model_type: modelType,
+                        source: source,
+                        target: target
+                    })
+                });
+                const data = await response.json();
+                const resultDiv = document.getElementById('trustResult');
+                resultDiv.className = data.trusted ? 'success' : 'error';
+                
+                if (data.trusted) {
+                    if (data.level) {
+                        resultDiv.textContent = `Trust Verified: ${data.level} trust level`;
+                    } else {
+                        resultDiv.textContent = `Trust Verified: Chain length ${data.chain_length}`;
+                        highlightPath(data.path);
+                    }
+                } else {
+                    resultDiv.textContent = `Trust Failed: ${data.reason}`;
+                }
+            } catch (error) {
+                console.error('Error checking trust:', error);
+            }
+        }
+    
+        function highlightPath(path) {
+            if (!path) return;
+            
+            edges.forEach(edge => {
+                edge.color = undefined;
+                edges.update(edge);
+            });
+            
+            for (let i = 0; i < path.length - 1; i++) {
+                const edge = edges.get().find(e => 
+                    e.from === path[i] && e.to === path[i + 1]
+                );
+                if (edge) {
+                    edge.color = {
+                        color: '#22c55e',
+                        highlight: '#22c55e'
+                    };
+                    edges.update(edge);
+                }
+            }
+        }
+    
+        function updateNodeSelectors() {
+            const nodeList = nodes.get().map(node => node.id);
+            ['sourceNode', 'targetNode', 'checkSource', 'checkTarget'].forEach(selectId => {
+                const select = document.getElementById(selectId);
+                select.innerHTML = nodeList
+                    .map(node => `<option value="${node}">${node}</option>`)
                     .join('');
             });
-
-            // Add nodes with trust level colors
-            data.nodes.forEach(node => {
-                nodes.add({
-                    id: node,
-                    label: `${node}\n(${data.trust_levels[node]})`,
-                    color: {
-                        background: getTrustLevelColor(data.trust_levels[node]),
-                        border: '#2c3e50'
+        }
+        function initNetwork() {
+            const container = document.getElementById('network');
+            const data = {
+                nodes: nodes,
+                edges: edges
+            };
+            const options = {
+                physics: {
+                    enabled: true,
+                    hierarchicalRepulsion: {
+                        nodeDistance: 150,
+                        springLength: 200,
+                        springConstant: 0.01,
+                        damping: 0.09
+                    },
+                    stabilization: {
+                        iterations: 50,
+                        updateInterval: 25
                     }
-                });
-            });
-
-            // Add edges
-            data.edges.forEach(([from, to]) => {
-                edges.add({ from, to });
-            });
-
-            network.fit();
+                },
+                layout: {
+                    hierarchical: {
+                        enabled: true,
+                        direction: 'UD',
+                        sortMethod: 'directed',
+                        nodeSpacing: 150,
+                        levelSeparation: 150,
+                        treeSpacing: 200
+                    }
+                },
+                nodes: {
+                    shape: 'box',
+                    margin: 10,
+                    font: { size: 14, face: 'system-ui' },
+                    borderWidth: 2,
+                    shadow: true
+                },
+                edges: {
+                    arrows: { to: { enabled: true, scaleFactor: 1 }},
+                    color: { color: '#64748b', highlight: '#2563eb' },
+                    width: 2,
+                    smooth: {
+                        type: 'cubicBezier',
+                        roundness: 0.5
+                    }
+                }
+            };
+            
+            network = new vis.Network(container, data, options);
         }
-
-        // Event handlers
-        async function addEntity() {
-            const name = document.getElementById('entity-name').value.trim();
-            const trustLevel = document.getElementById('trust-level').value;
-            
-            if (!name) return alert('Please enter an entity name');
-            
-            await fetch('/add_entity', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, trust_level: trustLevel })
-            });
-            
-            document.getElementById('entity-name').value = '';
-            await refreshGraph();
-        }
-
-        async function addTrust() {
-            const fromEntity = document.getElementById('from-entity').value;
-            const toEntity = document.getElementById('to-entity').value;
-            
-            if (fromEntity === toEntity) {
-                return alert('Cannot create trust relationship to self');
-            }
-            
-            await fetch('/add_trust', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ from: fromEntity, to: toEntity })
-            });
-            
-            await refreshGraph();
-        }
-
-        async function checkTrust() {
-            const fromEntity = document.getElementById('check-from').value;
-            const toEntity = document.getElementById('check-to').value;
-            
-            const response = await fetch('/check_trust', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ from: fromEntity, to: toEntity })
-            });
-            
-            const result = await response.json();
-            const resultDiv = document.getElementById('trust-result');
-            resultDiv.textContent = result.has_trust ? 
-                'Trust relationship exists!' : 
-                'No trust relationship found.';
-            resultDiv.className = 'trust-result ' + 
-                (result.has_trust ? 'trust-true' : 'trust-false');
-        }
-
-        // Initialize
-        createNetwork();
-        refreshGraph();
+    
+        document.getElementById('modelType').addEventListener('change', updateNodeTypeOptions);
+        document.addEventListener('DOMContentLoaded', () => {
+            updateNodeTypeOptions();
+            initNetwork();
+        });
     </script>
 </body>
 </html>

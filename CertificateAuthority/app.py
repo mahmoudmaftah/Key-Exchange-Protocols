@@ -1,151 +1,195 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_from_directory
 import networkx as nx
 from enum import Enum
-from typing import List, Set
+from dataclasses import dataclass
+from typing import Dict, Optional
+import os
+
+class TrustModel(Enum):
+    STRICT_HIERARCHY = "strict"
+    NETWORKED = "networked" 
+    WEB_BROWSER = "browser"
+    PGP = "pgp"
+
+class NodeType(Enum):
+    ROOT_CA = "Root CA"
+    SUPER_ROOT_CA = "Super Root CA" 
+    INTERMEDIATE_CA = "Intermediate CA"
+    END_ENTITY = "End Entity"
+    PGP_USER = "PGP User"
 
 class TrustLevel(Enum):
-    IMPLICIT = "Implicit"
     COMPLETE = "Complete"
-    PARTIAL = "Partial Trust"
-    MARGINAL = "Marginally Valid"
+    IMPLICIT = "Implicit"
+    PARTIAL = "Partial"
+    MARGINAL = "Marginal"
     INVALID = "Invalid"
 
-class TrustNetwork:
-    def __init__(self):
+@dataclass
+class Node:
+    name: str
+    node_type: NodeType
+    trust_level: Optional[TrustLevel] = None
+
+class CATrustSystem:
+    def __init__(self, model_type: TrustModel):
+        self.model_type = model_type
         self.graph = nx.DiGraph()
-        self.trust_levels = {}
+        self.nodes: Dict[str, Node] = {}
 
-    def add_entity(self, name: str, trust_level: str):
-        self.graph.add_node(name)
-        self.trust_levels[name] = trust_level
-
-    def add_trust(self, from_entity: str, to_entity: str):
-        if from_entity != to_entity:
-            self.graph.add_edge(from_entity, to_entity)
-
-    def get_trust_predecessors(self, node: str, trust_level: str) -> Set[str]:
-        return {pred for pred in self.graph.predecessors(node) 
-               if self.trust_levels[pred] == trust_level}
-
-    def validate_node_trust(self, node: str, visited: Set[str]) -> bool:
-        if node in visited:
-            return True
-            
-        level = self.trust_levels[node]
-        visited.add(node)
-
-        # Invalid entities break the trust chain
-        if level == TrustLevel.INVALID.value:
+    def add_node(self, name: str, node_type: str, trust_level: Optional[str] = None) -> bool:
+        if name in self.nodes:
             return False
-
-        # Implicit trust is always valid
-        if level == TrustLevel.IMPLICIT.value:
-            return True
-
-        # Get predecessors
-        predecessors = list(self.graph.predecessors(node))
-        if not predecessors:
-            return level == TrustLevel.IMPLICIT.value
-
-        # Complete trust needs at least one Implicit/Complete predecessor
-        if level == TrustLevel.COMPLETE.value:
-            valid_types = {TrustLevel.IMPLICIT.value, TrustLevel.COMPLETE.value}
-            return any(self.trust_levels[pred] in valid_types and 
-                      self.validate_node_trust(pred, visited.copy())
-                      for pred in predecessors)
-
-        # Marginal trust needs at least 2 valid Partial trust predecessors
-        if level == TrustLevel.MARGINAL.value:
-            partial_trusted = self.get_trust_predecessors(node, TrustLevel.PARTIAL.value)
-            valid_partials = sum(1 for pred in partial_trusted 
-                               if self.validate_node_trust(pred, visited.copy()))
-            return valid_partials >= 2
-
-        # Partial trust needs at least one valid Complete/Implicit predecessor
-        if level == TrustLevel.PARTIAL.value:
-            valid_types = {TrustLevel.IMPLICIT.value, TrustLevel.COMPLETE.value}
-            return any(self.trust_levels[pred] in valid_types and 
-                      self.validate_node_trust(pred, visited.copy())
-                      for pred in predecessors)
-
-        return False
-
-    def find_all_paths(self, start: str, end: str, visited: Set[str], path: List[str]) -> List[List[str]]:
-        if start in visited:
-            return []
-            
-        path = path + [start]
-        if start == end:
-            return [path]
-            
-        paths = []
-        visited = visited | {start}
         
-        for neighbor in self.graph.neighbors(start):
-            new_paths = self.find_all_paths(neighbor, end, visited, path)
-            paths.extend(new_paths)
-            
-        return paths
-
-    def check_trust(self, from_entity: str, to_entity: str) -> bool:
-        # Handle self-trust
-        if from_entity == to_entity:
-            level = self.trust_levels[from_entity]
-            return level in [TrustLevel.IMPLICIT.value, TrustLevel.COMPLETE.value]
-
-        # Find all possible paths
-        paths = self.find_all_paths(from_entity, to_entity, set(), [])
-        if not paths:
+        try:
+            node_type_enum = NodeType(node_type)
+            trust_level_enum = TrustLevel(trust_level) if trust_level else None
+            node = Node(name=name, node_type=node_type_enum, trust_level=trust_level_enum)
+            self.nodes[name] = node
+            self.graph.add_node(name)
+            return True
+        except ValueError:
             return False
 
-        # Validate each path
-        for path in paths:
-            valid = True
-            visited = set()
-            
-            # Validate each node in the path
-            for node in path:
-                if not self.validate_node_trust(node, visited.copy()):
-                    valid = False
-                    break
-                    
-            if valid:
-                return True
+    def add_edge(self, source: str, target: str) -> bool:
+        if source not in self.nodes or target not in self.nodes:
+            return False
 
+        # Validate edge based on model type
+        if self.model_type == TrustModel.STRICT_HIERARCHY:
+            if not self._validate_hierarchy_edge(source, target):
+                return False
+        elif self.model_type == TrustModel.NETWORKED:
+            if not self._validate_networked_edge(source, target):
+                return False
+        elif self.model_type == TrustModel.WEB_BROWSER:
+            if not self._validate_browser_edge(source, target):
+                return False
+        elif self.model_type == TrustModel.PGP:
+            if not self._validate_pgp_edge(source, target):
+                return False
+
+        self.graph.add_edge(source, target)
+        return True
+
+    def _validate_hierarchy_edge(self, source: str, target: str) -> bool:
+        source_node = self.nodes[source]
+        target_node = self.nodes[target]
+        
+        # Root CA can sign intermediate CAs
+        if source_node.node_type == NodeType.ROOT_CA:
+            return target_node.node_type in [NodeType.INTERMEDIATE_CA, NodeType.END_ENTITY]
+        
+        # Intermediate CA can sign other intermediates or end entities
+        if source_node.node_type == NodeType.INTERMEDIATE_CA:
+            return target_node.node_type in [NodeType.INTERMEDIATE_CA, NodeType.END_ENTITY]
+            
         return False
 
-app = Flask(__name__)
-trust_network = TrustNetwork()
+    def _validate_networked_edge(self, source: str, target: str) -> bool:
+        source_node = self.nodes[source]
+        target_node = self.nodes[target]
+
+        # Super Root CA model
+        if source_node.node_type == NodeType.SUPER_ROOT_CA:
+            return target_node.node_type == NodeType.ROOT_CA
+        if target_node.node_type == NodeType.SUPER_ROOT_CA:
+            return source_node.node_type == NodeType.ROOT_CA
+            
+        # Mesh model - Root CAs can cross-sign
+        return source_node.node_type == NodeType.ROOT_CA and target_node.node_type == NodeType.ROOT_CA
+
+    def _validate_browser_edge(self, source: str, target: str) -> bool:
+        source_node = self.nodes[source]
+        target_node = self.nodes[target]
+        
+        # Root CAs can sign any certificate
+        if source_node.node_type == NodeType.ROOT_CA:
+            return True
+            
+        # Intermediate CAs can sign end entities
+        if source_node.node_type == NodeType.INTERMEDIATE_CA:
+            return target_node.node_type == NodeType.END_ENTITY
+            
+        return False
+
+    def _validate_pgp_edge(self, source: str, target: str) -> bool:
+        source_node = self.nodes[source]
+        target_node = self.nodes[target]
+        return source_node.node_type == NodeType.PGP_USER and target_node.node_type == NodeType.PGP_USER
+
+    def check_trust(self, source: str, target: str) -> Dict:
+        if source not in self.nodes or target not in self.nodes:
+            return {"trusted": False, "reason": "Node not found"}
+
+        if self.model_type == TrustModel.PGP:
+            return self._check_pgp_trust(source, target)
+        
+        try:
+            path = nx.shortest_path(self.graph, source, target)
+            return {
+                "trusted": True,
+                "path": path,
+                "chain_length": len(path) - 1
+            }
+        except nx.NetworkXNoPath:
+            return {
+                "trusted": False,
+                "reason": "No trust path exists"
+            }
+
+    def _check_pgp_trust(self, source: str, target: str) -> Dict:
+        source_node = self.nodes[source]
+        target_node = self.nodes[target]
+        
+        if target_node.trust_level in [TrustLevel.COMPLETE, TrustLevel.IMPLICIT]:
+            return {"trusted": True, "level": "Complete"}
+            
+        # Check for marginal trust (requires multiple partial trust signatures)
+        partial_signers = [n for n in self.graph.predecessors(target)
+                         if self.nodes[n].trust_level == TrustLevel.PARTIAL]
+        
+        if len(partial_signers) >= 2:
+            return {"trusted": True, "level": "Marginal"}
+            
+        return {"trusted": False, "reason": "Insufficient trust signatures"}
+
+app = Flask(__name__, template_folder='templates')
+trust_systems: Dict[str, CATrustSystem] = {}
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
-@app.route('/add_entity', methods=['POST'])
-def add_entity():
-    data = request.get_json()
-    trust_network.add_entity(data['name'], data['trust_level'])
-    return jsonify({"success": True})
+@app.route('/templates/<path:path>')
+def serve_template(path):
+    return send_from_directory('templates', path)
 
-@app.route('/add_trust', methods=['POST'])
-def add_trust():
-    data = request.get_json()
-    trust_network.add_trust(data['from'], data['to'])
-    return jsonify({"success": True})
+@app.route('/api/create_model', methods=['POST'])
+def create_model():
+    try:
+        data = request.json
+        model_type = TrustModel(data['type'])
+        trust_systems[model_type.value] = CATrustSystem(model_type)
+        return jsonify({"success": True})
+    except (KeyError, ValueError):
+        return jsonify({"error": "Invalid model type"}), 400
 
-@app.route('/check_trust', methods=['POST'])
-def check_trust():
-    data = request.get_json()
-    has_trust = trust_network.check_trust(data['from'], data['to'])
-    return jsonify({"has_trust": has_trust})
+@app.route('/api/add_node', methods=['POST'])
+def add_node():
+    data = request.json
+    model_type = data.get('model_type')
+    
+    if not model_type or model_type not in trust_systems:
+        return jsonify({"success": False, "error": "Invalid model type"}), 400
 
-@app.route('/get_graph', methods=['GET'])
-def get_graph():
-    return jsonify({
-        "nodes": list(trust_network.graph.nodes()),
-        "edges": list(trust_network.graph.edges()),
-        "trust_levels": trust_network.trust_levels
-    })
+    success = trust_systems[model_type].add_node(
+        name=data.get('name'),
+        node_type=data.get('node_type'),
+        trust_level=data.get('trust_level')
+    )
+    
+    return jsonify({"success": success})
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, port=5000)
