@@ -32,3 +32,8 @@ def check_trust():
         data['target']
     )
     return jsonify(result)
+@pgp_bp.route('/api/restart', methods=['POST'])
+def restart():
+    global pgp_trust_system
+    pgp_trust_system = PGPTrustWeb()  # Create a new instance
+    return jsonify({"success": True})

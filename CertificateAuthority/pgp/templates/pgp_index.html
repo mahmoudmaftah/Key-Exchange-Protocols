@@ -143,6 +143,12 @@
                 </div>
             </div>
         </div>
+        <div class="col-span-full">
+            <button onclick="restartSystem()" 
+                    class="bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700 transition-colors">
+                Restart System
+            </button>
+        </div>
 
         <!-- Network Visualization -->
         <div id="network"></div>
@@ -465,6 +471,34 @@
                     `)
                     .join('');
             });
+        }
+        async function restartSystem() {
+            if (!confirm('Are you sure you want to restart? This will erase all users and trust relationships.')) {
+                return;
+            }
+            
+            const response = await fetch('/pgp/api/restart', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            
+            const data = await response.json();
+            if (data.success) {
+                // Clear all nodes and edges
+                nodes.clear();
+                edges.clear();
+                
+                // Clear all selectors
+                ['signerNode', 'targetNode', 'checkViewer', 'checkTarget'].forEach(id => {
+                    document.getElementById(id).innerHTML = '';
+                });
+                
+                // Clear any trust results
+                document.getElementById('trustResult')?.classList.add('hidden');
+                
+                // Clear username input
+                document.getElementById('nodeName').value = '';
+            }
         }
 
         document.addEventListener('DOMContentLoaded', initNetwork);

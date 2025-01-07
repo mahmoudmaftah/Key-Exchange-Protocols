@@ -25,3 +25,9 @@ def check_trust():
     data = request.json
     result = web_trust_system.check_trust(data['source'], data['target'])
     return jsonify(result)
+
+@web_bp.route('/api/restart', methods=['POST'])
+def restart():
+    global web_trust_system
+    web_trust_system = WebTrustHierarchy()  # Create a new instance
+    return jsonify({"success": True})

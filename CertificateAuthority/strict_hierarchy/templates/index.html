@@ -153,9 +153,12 @@
         </div>
     </div>
 
-   <!-- <div class="flex justify-end mb-4">
-        <button onclick="clearGraph()" class="bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700 transition">Clear Graph</button>
-    </div>-->
+    <div class="col-span-full">
+        <button onclick="restartSystem()" 
+                class="bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700 transition-colors">
+            Restart System
+        </button>
+    </div>
 
     <div id="network"></div>
 </div>
@@ -344,25 +347,32 @@
         }
     }
     
-    function clearGraph() {
-        if (confirm('Are you sure you want to clear the entire graph?')) {
-            // Clear vis.js nodes and edges
+    async function restartSystem() {
+        if (!confirm('Are you sure you want to restart? This will erase all users and trust relationships.')) {
+            return;
+        }
+        
+        const response = await fetch('/strict/api/restart', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            // Clear all nodes and edges
             nodes.clear();
             edges.clear();
-    
-            // Reset node and edge selectors to empty
-            ['sourceNode', 'targetNode', 'checkSource', 'checkTarget'].forEach(id => {
-                const select = document.getElementById(id);
-                select.innerHTML = '';  // Clear all options
+            
+            // Clear all selectors
+            ['signerNode', 'targetNode', 'checkViewer', 'checkTarget'].forEach(id => {
+                document.getElementById(id).innerHTML = '';
             });
-    
-            // Clear visual network
-            network.setData({ nodes: new vis.DataSet([]), edges: new vis.DataSet([]) });
-    
-            // Clear result display
-            const resultDiv = document.getElementById('trustResult');
-            resultDiv.textContent = '';
-            resultDiv.className = '';
+            
+            // Clear any trust results
+            document.getElementById('trustResult')?.classList.add('hidden');
+            
+            // Clear username input
+            document.getElementById('nodeName').value = '';
         }
     }
     
